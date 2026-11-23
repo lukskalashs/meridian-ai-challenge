@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Meridian Proposal Assistant</title>
+  <style>
+    :root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #172f3d; background: #edf2f4; color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { padding: 22px 28px; color: #fff; background: #15384b; }
+    header h1 { margin: 0 0 5px; font-size: 1.35rem; }
+    header p { margin: 0; color: #d3e1e8; }
+    main { max-width: 1320px; margin: 24px auto; padding: 0 24px; }
+    .layout { display: grid; grid-template-columns: minmax(320px, .9fr) minmax(400px, 1.1fr); gap: 20px; }
+    .card { min-width: 0; padding: 20px; border: 1px solid #dce5e9; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgb(21 56 75 / 5%); }
+    h2 { margin: 0 0 7px; color: #15384b; font-size: 1.12rem; }
+    .hint, .subtle { color: #526977; font-size: .88rem; line-height: 1.5; }
+    label { display: block; margin: 2px 0 5px; font-size: .9rem; font-weight: 650; }
+    textarea, input, select { width: 100%; border: 1px solid #bacbd3; border-radius: 7px; padding: 9px 10px; color: #172f3d; background: #fff; font: inherit; }
+    #notes { min-height: 205px; resize: vertical; line-height: 1.45; }
+    button { padding: 9px 13px; border: 0; border-radius: 6px; color: #fff; background: #1e7499; font: inherit; font-weight: 650; cursor: pointer; }
+    button.secondary { color: #173c50; background: #e7eef1; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+    .status { min-height: 1.3em; margin: 12px 0 0; font-size: .9rem; }
+    .status.error { color: #a52e24; } .status.success { color: #126a50; }
+    .audio-status { min-height: 1.3em; margin: 7px 0 0; font-size: .88rem; }
+    .audio-status.error { color: #a52e24; } .audio-status.success { color: #126a50; }
+    .review { margin: 10px 0 0; padding-left: 20px; color: #714f0b; }
+    .review:empty { display: none; }
+    .proposal-editor { display: grid; gap: 16px; }
+    .proposal-group { min-width: 0; }
+    .proposal-group legend { margin-bottom: 8px; color: #173c50; font-size: .92rem; font-weight: 750; }
+    .proposal-fields { display: grid; gap: 10px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .proposal-field { min-width: 0; }
+    .proposal-field.wide { grid-column: 1 / -1; }
+    .proposal-field textarea { min-height: 82px; resize: vertical; line-height: 1.4; }
+    .proposal-empty { padding: 14px; border-radius: 8px; background: #f5f8f9; color: #526977; }
+    .json-panel { margin-top: 16px; border: 1px solid #dce5e9; border-radius: 8px; padding: 12px; }
+    .json-panel summary { cursor: pointer; color: #15384b; font-weight: 650; }
+    #proposalJsonEdit { min-height: 280px; margin-top: 10px; font: 12px/1.5 Consolas, monospace; white-space: pre; }
+    #proposalJsonEdit.invalid { border-color: #a52e24; outline: 3px solid rgb(165 46 36 / 12%); }
+    .mapping-notice { margin: 10px 0; padding: 10px 12px; border-left: 3px solid #bd8c30; background: #fff8e9; color: #644d21; font-size: .88rem; line-height: 1.45; }
+    .generator { margin-top: 20px; padding: 0; overflow: hidden; }
+    .generator-heading { padding: 16px 20px; border-bottom: 1px solid #dce5e9; }
+    iframe { display: block; width: 100%; height: 900px; border: 0; background: #fff; }
+    @media (max-width: 850px) { .layout { grid-template-columns: 1fr; } iframe { height: 700px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Meridian Proposal Assistant</h1>
+    <p>Turn adviser notes into a reviewable draft, then open it in the proposal generator.</p>
+  </header>
+  <main>
+    <div class="layout">
+      <section class="card">
+        <h2>1. Adviser notes</h2>
+        <p class="hint">Paste typed notes or a voice-note transcript. The assistant preserves uncertainty and flags details that need confirmation.</p>
+        <label for="notes">Meeting notes</label>
+        <textarea id="notes" maxlength="12000"></textarea>
+        <p class="subtle"><span id="charCount">0</span>/12,000 characters</p>
+        <label for="audioFile">Or transcribe a voice note</label>
+        <input id="audioFile" type="file" accept=".flac,.m4a,.mp3,.mp4,.mpeg,.mpga,.ogg,.wav,.webm">
+        <p class="subtle">Supported audio formats, up to 20 MB. The transcript will be placed in Meeting notes for review.</p>
+        <div class="actions"><button id="transcribe" class="secondary" type="button" disabled>Transcribe audio</button></div>
+        <p id="audioStatus" class="audio-status" role="status"></p>
+        <label for="modelChoice">Model portfolio</label>
+        <select id="modelChoice" disabled><option value="auto">Let AI suggest from the shared models</option></select>
+        <p id="modelStatus" class="subtle">Waiting for the proposal generator to load its live model list…</p>
+        <div class="actions">
+          <button id="generate" type="button" disabled>Generate draft</button>
+          <button id="loadSample" class="secondary" type="button">Load sample notes</button>
+        </div>
+        <p id="status" class="status" role="status"></p>
+        <ul id="reviewNotes" class="review"></ul>
+        <ul id="missingInfo" class="review"></ul>
+      </section>
+
+      <section class="card">
+        <h2>2. Review and edit</h2>
+        <p class="hint">Review the friendly fields or edit the underlying proposal JSON before loading.</p>
+        <p class="mapping-notice">The generator controls which values appear in forms and PDF. You can edit JSON directly, but values with no matching generator field may be retained rather than displayed.</p>
+        <div id="proposalEditor" class="proposal-editor"><p class="proposal-empty">Generate a draft to review and edit its fields.</p></div>
+        <details class="json-panel" open>
+          <summary>Edit proposal JSON</summary>
+          <p class="subtle">This object is synchronized with the friendly fields and is sent to <code>window.loadProposal(...)</code>.</p>
+          <textarea id="proposalJsonEdit" spellcheck="false" placeholder="Generated proposal JSON appears here"></textarea>
+          <p id="jsonStatus" class="subtle"></p>
+        </details>
+        <div class="actions"><button id="apply" type="button" disabled>Load into proposal generator</button></div>
+      </section>
+    </div>
+    <section class="card generator">
+      <div class="generator-heading"><h2 id="generatorHeading">3. Proposal generator</h2><p class="subtle">The reviewed proposal is loaded into the supplied generator.</p></div>
+      <iframe id="generator" title="Meridian proposal generator" src="/challenge-generator.html"></iframe>
+    </section>
+  </main>
+  <script>
+    const notes = document.getElementById('notes');
+    const audioFile = document.getElementById('audioFile');
+    const transcribeButton = document.getElementById('transcribe');
+    const audioStatus = document.getElementById('audioStatus');
+    const modelChoice = document.getElementById('modelChoice');
+    const modelStatus = document.getElementById('modelStatus');
+    const generateButton = document.getElementById('generate');
+    const applyButton = document.getElementById('apply');
+    const proposalJsonEdit = document.getElementById('proposalJsonEdit');
+    const proposalEditor = document.getElementById('proposalEditor');
+    const status = document.getElementById('status');
+    const iframe = document.getElementById('generator');
+    let models = [], currentProposal = null, modelListReady = false, updatingJson = false;
+    let sampleIndex = 0;
+    const samples = [['01-notes-retiree-income.txt','Retiree income'],['02-notes-growth-offshore.txt','Global growth trust'],['03-notes-sparse.txt','Sparse prospect notes'],['04-voice-note-transcript.txt','Voice transcript']];
+
+    const labels = {
+      clientName:'Client name', clientEmail:'Client email', introGreetTo:'Address proposal to', applyModel:'Model portfolio',
+      needs:'Client needs and objectives', clientType:'Client type', mandateType:'Mandate type', wrapper:'Direct or via a wrapper',
+      currency:'Currency', totalInvestment:'Indicative investment amount', portfolioValue:'Managed portfolio amount',
+      portfolioPct:'Managed portfolio percentage', platformName:'Platform', platformValue:'Platform amount',
+      platformPct:'Platform percentage', incomeValue:'Income drawdown amount', incomePct:'Income percentage',
+      investmentStrategy:'Investment strategy', rationale:'Investment objective / rationale', strategyBullets:'Strategy characteristics',
+      targetReturn:'Investment target return', investmentHorizon:'Investment horizon', benchmark:'Benchmark',
+      riskProfile:'Risk discussion', riskProfileCategory:'Risk profile', advisorFee:'Financial adviser fee', management:'Management fee', adminFee:'Administration fee',
+      brokerage:'Brokerage', isReplacement:'Does this replace an existing investment?', details:'Replacement details'
+    };
+    const options = {
+      introGreetTo:['client','advisor'],
+      'goalAssessment.clientType':['Individual','Entity','Trust'],
+      'goalAssessment.mandateType':['Discretionary','Self-directed'],
+      'goalAssessment.wrapper':['Direct','Via a wrapper'],
+      'goalAssessment.currency':['ZAR','USD','EUR','GBP','AUD','JPY','CNY','Multi-currency / Multi-asset'],
+      'strategy.currency':['ZAR','USD','EUR','GBP','AUD','JPY','CNY','Multi-currency / Multi-asset'],
+      'objective.riskProfileCategory':['Conservative','Moderately Conservative','Moderate','Moderately Aggressive','Aggressive'],
+      'objective.investmentHorizon':['1 year+','3 years+','5 years+']
+    };
+    const primaryPaths = [
+      ['clientName'],['introGreetTo'],['applyModel'],['needs'],
+      ['goalAssessment','clientType'],['goalAssessment','mandateType'],['goalAssessment','wrapper'],['goalAssessment','currency'],
+      ['goalAssessment','keyFigures','totalInvestment'],['goalAssessment','keyFigures','incomeValue'],
+      ['objective','targetReturn'],['objective','riskProfileCategory'],['objective','investmentHorizon'],['objective','benchmark'],['objective','riskProfile'],
+      ['goalAssessment','investmentStrategy'],['goalAssessment','rationale'],['goalAssessment','strategyBullets'],
+      ['fees','advisorFee'],['replacements','isReplacement'],['replacements','details'],['clientEmail']
+    ];
+    const alwaysVisiblePaths = new Set([
+      'clientName','introGreetTo','applyModel','needs','goalAssessment.clientType'
+    ]);
+
+    function setStatus(message, kind) { status.textContent = message; status.className = `status ${kind || ''}`; }
+    function addMessages(id, title, messages) {
+      const list = document.getElementById(id); list.replaceChildren();
+      if (!messages.length) return;
+      const heading = document.createElement('li'); heading.textContent = title; heading.style.fontWeight = '700'; list.appendChild(heading);
+      messages.forEach((text) => { const item = document.createElement('li'); item.textContent = text; list.appendChild(item); });
+    }
+    function getAt(object, parts) { return parts.reduce((value, key) => value && value[key], object); }
+    function setAt(object, parts, value) {
+      let parent = object;
+      parts.slice(0,-1).forEach((key) => { if (!parent[key] || typeof parent[key] !== 'object') parent[key] = {}; parent = parent[key]; });
+      parent[parts.at(-1)] = value;
+    }
+    function deleteAt(object, parts) {
+      let parent = object;
+      for (const key of parts.slice(0,-1)) { if (!parent[key]) return; parent = parent[key]; }
+      delete parent[parts.at(-1)];
+    }
+    function clean(value) {
+      if (value === null || value === '') return undefined;
+      if (Array.isArray(value)) { const list = value.map(clean).filter((v) => v !== undefined); return list.length ? list : undefined; }
+      if (typeof value === 'object') { const out = {}; Object.entries(value).forEach(([key,child]) => { const v = clean(child); if (v !== undefined) out[key]=v; }); return Object.keys(out).length ? out : undefined; }
+      return value;
+    }
+    function syncJsonFromObject() {
+      updatingJson = true;
+      proposalJsonEdit.value = currentProposal ? JSON.stringify(clean(currentProposal) || {}, null, 2) : '';
+      proposalJsonEdit.classList.remove('invalid');
+      document.getElementById('jsonStatus').textContent = '';
+      applyButton.disabled = !currentProposal;
+      updatingJson = false;
+    }
+    function syncFriendlyField(parts, control) {
+      if (control.value === '' || (typeof control.value === 'string' && !control.value.trim())) deleteAt(currentProposal, parts);
+      else setAt(currentProposal, parts, control.value);
+      syncJsonFromObject();
+    }
+    function makeField(parts) {
+      const key = parts.at(-1), path = parts.join('.');
+      const value = getAt(currentProposal, parts);
+      const wrap = document.createElement('div'); wrap.className = 'proposal-field';
+      if (['needs','rationale','strategyBullets','riskProfile','details'].includes(key) || (typeof value === 'string' && value.length > 110)) wrap.classList.add('wide');
+      const id = `field-${parts.join('-')}`;
+      const label = document.createElement('label'); label.htmlFor=id; label.textContent=labels[key] || key; wrap.appendChild(label);
+      let control;
+      const choices = path === 'applyModel'
+        ? models.map((model) => ({ value:model.id,label:`${model.label} — ${model.portfolioName || model.id}` }))
+        : (options[path] || []).map((value) => ({ value,label:value }));
+      if (choices.length) {
+        control=document.createElement('select'); control.add(new Option('Not specified',''));
+        choices.forEach((choice) => control.add(new Option(choice.label,choice.value)));
+        let selectedValue = value == null ? '' : String(value);
+        if (selectedValue && !choices.some((choice) => choice.value === selectedValue)) {
+          const normalized = selectedValue.toLowerCase().replace(/[^a-z0-9]+/g, '');
+          const matches = choices.filter((choice) => {
+            const option = choice.value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+            const prefixLength = Math.min(4, option.length, normalized.length);
+            return prefixLength >= 4 && option.slice(0, prefixLength) === normalized.slice(0, prefixLength);
+          });
+          if (matches.length === 1) {
+            selectedValue = matches[0].value;
+            setAt(currentProposal, parts, selectedValue);
+          } else {
+            control.add(new Option(`Unrecognized value: ${value}`,String(value)));
+          }
+        }
+        control.value=selectedValue;
+        control.addEventListener('change',()=>syncFriendlyField(parts,control));
+      } else if (typeof value === 'boolean' || key === 'isReplacement') {
+        control=document.createElement('input'); control.type='checkbox'; control.checked=value===true;
+        control.addEventListener('change',()=>{ setAt(currentProposal,parts,control.checked); syncJsonFromObject(); });
+      } else {
+        const multiline = key === 'needs' || ['rationale','strategyBullets','riskProfile','details','composition','text','introduction','about','process'].includes(key);
+        control=document.createElement(multiline?'textarea':'input');
+        if (control.tagName==='INPUT') control.type='text';
+        control.value=typeof value==='string'?value:'';
+        control.placeholder='Not provided';
+        control.addEventListener('input',()=>syncFriendlyField(parts,control));
+      }
+      control.id=id; wrap.appendChild(control); return wrap;
+    }
+    function renderEditor() {
+      proposalEditor.replaceChildren();
+      if (!currentProposal) { proposalEditor.innerHTML='<p class="proposal-empty">Generate a draft to review and edit its fields.</p>'; syncJsonFromObject(); return; }
+      const groups = [
+        ['Client details',[['clientName'],['introGreetTo'],['applyModel']]],
+        ['Client needs',[['needs']]],
+        ['Goal assessment',primaryPaths.filter((p)=>p[0]==='goalAssessment')],
+        ['Investment objective',primaryPaths.filter((p)=>p[0]==='objective')],
+        ['Fees and replacements',primaryPaths.filter((p)=>p[0]==='fees'||p[0]==='replacements')],
+        ['Client contact',primaryPaths.filter((p)=>p[0]==='clientEmail')]
+      ];
+      groups.forEach(([title,paths]) => {
+        const present=paths.filter((parts)=>getAt(currentProposal,parts)!==undefined);
+        const hasRequiredPath = paths.some((parts)=>alwaysVisiblePaths.has(parts.join('.')));
+        if (!present.length && title !== 'Client details' && !hasRequiredPath) return;
+        const group=document.createElement('fieldset'); group.className='proposal-group';
+        const legend=document.createElement('legend'); legend.textContent=title; group.appendChild(legend);
+        const fields=document.createElement('div'); fields.className='proposal-fields';
+        paths.forEach((parts)=>{ if (getAt(currentProposal,parts)!==undefined || alwaysVisiblePaths.has(parts.join('.'))) fields.appendChild(makeField(parts)); });
+        group.appendChild(fields); proposalEditor.appendChild(group);
+      });
+      syncJsonFromObject();
+    }
+    function loadModels() {
+      try {
+        const challenge=iframe.contentWindow.challenge;
+        if (!challenge || typeof challenge.models!=='function') throw new Error('not ready');
+        models=challenge.models();
+        modelChoice.replaceChildren(new Option('Let AI suggest from the shared models','auto'),new Option('Do not apply a model','none'));
+        models.forEach((model)=>modelChoice.add(new Option(`${model.label} — ${model.portfolioName || model.id}`,model.id)));
+        modelChoice.disabled=false; modelListReady=true;
+        modelStatus.textContent=`${models.length} live models available from the generator.`;
+        generateButton.disabled=!notes.value.trim();
+      } catch { setTimeout(loadModels,250); }
+    }
+    iframe.addEventListener('load',loadModels);
+    notes.addEventListener('input',()=>{ document.getElementById('charCount').textContent=notes.value.length; generateButton.disabled=!notes.value.trim()||!modelListReady; });
+    document.getElementById('loadSample').addEventListener('click',async()=>{
+      const [filename,label]=samples[sampleIndex++%samples.length];
+      const response=await fetch(`/sample-inputs/${filename}`);
+      notes.value=await response.text(); notes.dispatchEvent(new Event('input')); setStatus(`Loaded sample: ${label}.`,'success');
+    });
+    audioFile.addEventListener('change',()=>{
+      transcribeButton.disabled=!audioFile.files.length;
+      audioStatus.textContent=audioFile.files.length?`Selected: ${audioFile.files[0].name}`:'';
+      audioStatus.className='audio-status';
+    });
+    transcribeButton.addEventListener('click',async()=>{
+      const file=audioFile.files[0];
+      if(!file) return;
+      if(file.size>20*1024*1024) { audioStatus.textContent='Audio files must be 20 MB or smaller.'; audioStatus.className='audio-status error'; return; }
+      transcribeButton.disabled=true; audioStatus.textContent='Transcribing audio…'; audioStatus.className='audio-status';
+      try {
+        const bytes=new Uint8Array(await file.arrayBuffer());
+        let binary='';
+        for(let offset=0;offset<bytes.length;offset+=0x8000) binary+=String.fromCharCode(...bytes.subarray(offset,offset+0x8000));
+        const response=await fetch('/api/transcribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:file.type,audioBase64:btoa(binary)})});
+        const result=await response.json(); if(!response.ok) throw new Error(result.error||`Transcription failed (HTTP ${response.status}).`);
+        notes.value=result.text; notes.dispatchEvent(new Event('input'));
+        audioStatus.textContent='Transcript ready. Review it above, then choose Generate draft.';
+        audioStatus.className='audio-status success';
+      } catch(error) {
+        audioStatus.textContent=error.message; audioStatus.className='audio-status error';
+      } finally { transcribeButton.disabled=!audioFile.files.length; }
+    });
+    proposalJsonEdit.addEventListener('input',()=>{
+      if (updatingJson) return;
+      try {
+        const parsed=JSON.parse(proposalJsonEdit.value);
+        if (!parsed || Array.isArray(parsed) || typeof parsed!=='object') throw new Error('Proposal JSON must be an object.');
+        currentProposal=parsed; proposalJsonEdit.classList.remove('invalid');
+        document.getElementById('jsonStatus').textContent='Valid JSON. Friendly fields will refresh after the next edit.';
+        applyButton.disabled=false;
+      } catch (error) { proposalJsonEdit.classList.add('invalid'); document.getElementById('jsonStatus').textContent=error.message; applyButton.disabled=true; }
+    });
+    generateButton.addEventListener('click',async()=>{
+      generateButton.disabled=true; applyButton.disabled=true; setStatus('Extracting proposal details…'); addMessages('reviewNotes','Review notes',[]); addMessages('missingInfo','Missing information to confirm',[]);
+      try {
+        const response=await fetch('/api/proposal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes:notes.value,models,modelOverride:modelChoice.value})});
+        const result=await response.json(); if(!response.ok) throw new Error(result.error||`Request failed (HTTP ${response.status}).`);
+        currentProposal=result.proposal; renderEditor(); addMessages('reviewNotes','Review notes',result.reviewNotes||[]); addMessages('missingInfo','Missing information to confirm',result.missingInformation||[]); setStatus('Draft generated. Review it before loading.','success');
+      } catch(error){ setStatus(error.message,'error'); } finally { generateButton.disabled=!notes.value.trim()||!modelListReady; }
+    });
+    applyButton.addEventListener('click',()=>{
+      try {
+        let proposal;
+        try { proposal=JSON.parse(proposalJsonEdit.value); } catch { throw new Error('Fix the proposal JSON before loading.'); }
+        const loadProposal=iframe.contentWindow.loadProposal;
+        if(typeof loadProposal!=='function') throw new Error('The proposal generator is not ready.');
+        const id=loadProposal(proposal); setStatus(`Proposal loaded into the generator (ID: ${id}).`,'success'); document.getElementById('generatorHeading').scrollIntoView({behavior:'smooth'});
+      } catch(error){ setStatus(`Could not load proposal: ${error.message}`,'error'); }
+    });
+  </script>
+</body>
+</html>
